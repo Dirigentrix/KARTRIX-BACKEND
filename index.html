@@ -27,6 +27,7 @@
         box-shadow: 0 20px 80px rgba(0, 0, 0, 0.35);
       }
       textarea,
+      input,
       pre {
         width: 100%;
         box-sizing: border-box;
@@ -77,12 +78,36 @@
         margin: 14px 0 8px;
         font-weight: 600;
       }
+      .status {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+        margin-top: 14px;
+      }
+      .chip {
+        background: #0b1228;
+        border: 1px solid #2a3a73;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .chip span {
+        display: block;
+        color: #8ca0d4;
+        font-size: 0.85rem;
+        margin-bottom: 6px;
+      }
+      .chip strong {
+        font-size: 1rem;
+      }
     </style>
   </head>
   <body>
     <div class="card">
       <h1>KARTRIX-BACKEND</h1>
-      <p>FastAPI command parser/executor for the DARTRIX blueprint.</p>
+      <p>FastAPI command parser/executor with S-NET mode switching for the DARTRIX blueprint.</p>
+
+      <label for="backendUrl">Backend URL</label>
+      <input id="backendUrl" placeholder="http://localhost:8000" />
 
       <label for="input">Command</label>
       <textarea id="input" placeholder="Type a command..."></textarea>
@@ -90,6 +115,14 @@
       <div class="row">
         <button id="parseBtn">Parse</button>
         <button id="executeBtn" class="secondary">Execute</button>
+        <button id="refreshBtn" class="secondary">Refresh S-NET</button>
+      </div>
+
+      <div class="status">
+        <div class="chip"><span>engine_mode</span><strong id="engineMode">—</strong></div>
+        <div class="chip"><span>alert_signal</span><strong id="alertSignal">—</strong></div>
+        <div class="chip"><span>ren12_override</span><strong id="ren12Override">—</strong></div>
+        <div class="chip"><span>k12_gate</span><strong id="k12Gate">—</strong></div>
       </div>
 
       <label for="output">Response</label>
@@ -101,39 +134,76 @@
       const output = document.getElementById("output");
       const parseBtn = document.getElementById("parseBtn");
       const executeBtn = document.getElementById("executeBtn");
+      const refreshBtn = document.getElementById("refreshBtn");
+      const backendUrlInput = document.getElementById("backendUrl");
+      const engineMode = document.getElementById("engineMode");
+      const alertSignal = document.getElementById("alertSignal");
+      const ren12Override = document.getElementById("ren12Override");
+      const k12Gate = document.getElementById("k12Gate");
       let parsedCommand = null;
+
+      backendUrlInput.value = localStorage.getItem("kartrixBackendUrl") || "http://localhost:8000";
+
+      function backendUrl() {
+        const value = backendUrlInput.value.trim() || "http://localhost:8000";
+        localStorage.setItem("kartrixBackendUrl", value);
+        return value.replace(/\/$/, "");
+      }
 
       function render(value) {
         output.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
       }
 
+      function renderState(state) {
+        engineMode.textContent = state?.engine_mode ?? "—";
+        alertSignal.textContent = state?.alert_signal ?? "—";
+        ren12Override.textContent = state?.ren12_override ?? "—";
+        k12Gate.textContent = state?.k12_gate ?? "—";
+      }
+
+      async function fetchJson(path, options) {
+        const response = await fetch(`${backendUrl()}${path}`, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        return await response.json();
+      }
+
       async function parseCommand() {
         const text = input.value.trim();
-        const response = await fetch("/parse", {
+        const data = await fetchJson("/parse", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text })
         });
-        const data = await response.json();
-        parsedCommand = data;
+        parsedCommand = data.command;
         render(data);
+        renderState(data.snet_state);
       }
 
       async function executeCommand() {
         if (!parsedCommand) {
           await parseCommand();
         }
-        const response = await fetch("/execute", {
+        const data = await fetchJson("/execute", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ command: parsedCommand })
         });
-        const data = await response.json();
         render(data);
+        renderState(data.snet_state);
+      }
+
+      async function refreshState() {
+        const data = await fetchJson("/state", { method: "GET" });
+        renderState(data);
       }
 
       parseBtn.addEventListener("click", () => parseCommand().catch((error) => render(String(error))));
       executeBtn.addEventListener("click", () => executeCommand().catch((error) => render(String(error))));
+      refreshBtn.addEventListener("click", () => refreshState().catch((error) => render(String(error))));
+      backendUrlInput.addEventListener("change", () => refreshState().catch((error) => render(String(error))));
+
+      refreshState().catch((error) => render(String(error)));
+      setInterval(() => refreshState().catch(() => {}), 2000);
     </script>
   </body>
 </html>
