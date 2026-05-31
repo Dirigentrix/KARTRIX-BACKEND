@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from snet import SNetAgent
 
-app = FastAPI(title="KARTRIX-BACKEND", version="1.1.0")
+app = FastAPI(title="KARTRIX-BACKEND", version="1.2.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,22 +30,27 @@ class Command(BaseModel):
     model: Optional[str] = Field(default=None, description="Specific provider model name")
 
 
-class ParseRequest(BaseModel):
+class SNetFeedback(BaseModel):
+    external_noise: Optional[float] = None
+    internal_noise: Optional[float] = None
+    anomaly_score: Optional[float] = None
+    intent_override: Optional[str] = None
+    ren12_status: Optional[str] = None
+    k12_status: Optional[str] = None
+
+
+class ParseRequest(SNetFeedback):
     text: str
     provider: Optional[Literal["gemini", "gpt", "ollama"]] = None
     model: Optional[str] = None
-    external_noise: Optional[float] = None
-    internal_noise: Optional[float] = None
-    anomaly_score: Optional[float] = None
-    intent_override: Optional[str] = None
 
 
-class ExecuteRequest(BaseModel):
+class ExecuteRequest(SNetFeedback):
     command: Command
-    external_noise: Optional[float] = None
-    internal_noise: Optional[float] = None
-    anomaly_score: Optional[float] = None
-    intent_override: Optional[str] = None
+
+
+class FeedbackRequest(SNetFeedback):
+    pass
 
 
 @app.get("/")
@@ -53,13 +58,29 @@ def root() -> Dict[str, str]:
     return {
         "name": "KARTRIX-BACKEND",
         "status": "ok",
-        "blueprint": "DARTRIX Core Architecture",
+        "blueprint": "DARTRIX ENGINE v2",
     }
 
 
 @app.get("/state")
 def state() -> Dict[str, Any]:
     return snet_agent.snapshot()
+
+
+@app.post("/feedback")
+def feedback(payload: FeedbackRequest) -> Dict[str, Any]:
+    snet_state = snet_agent.evaluate(
+        external_noise=payload.external_noise,
+        internal_noise=payload.internal_noise,
+        anomaly_score=payload.anomaly_score,
+        intent_override=payload.intent_override,
+        ren12_status=payload.ren12_status,
+        k12_status=payload.k12_status,
+    )
+    return {
+        "status": "received",
+        "snet_state": snet_state.to_dict(),
+    }
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -73,22 +94,28 @@ def _coerce_float(value: Any) -> Optional[float]:
 
 def _extract_snet_inputs(
     *,
-    args: Optional[Dict[str, Any]] = None,
     external_noise: Optional[float] = None,
     internal_noise: Optional[float] = None,
     anomaly_score: Optional[float] = None,
     intent_override: Optional[str] = None,
+    ren12_status: Optional[str] = None,
+    k12_status: Optional[str] = None,
+    args: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     args = args or {}
     resolved_intent_override = intent_override or args.get("intent_override")
     resolved_external_noise = external_noise if external_noise is not None else _coerce_float(args.get("external_noise"))
     resolved_internal_noise = internal_noise if internal_noise is not None else _coerce_float(args.get("internal_noise"))
     resolved_anomaly_score = anomaly_score if anomaly_score is not None else _coerce_float(args.get("anomaly_score"))
+    resolved_ren12_status = ren12_status or args.get("ren12_status")
+    resolved_k12_status = k12_status or args.get("k12_status")
     return {
         "external_noise": resolved_external_noise,
         "internal_noise": resolved_internal_noise,
         "anomaly_score": resolved_anomaly_score,
         "intent_override": resolved_intent_override,
+        "ren12_status": resolved_ren12_status,
+        "k12_status": resolved_k12_status,
     }
 
 
@@ -127,6 +154,8 @@ def parse(payload: ParseRequest) -> Dict[str, Any]:
             internal_noise=payload.internal_noise,
             anomaly_score=payload.anomaly_score,
             intent_override=intent_override,
+            ren12_status=payload.ren12_status,
+            k12_status=payload.k12_status,
         )
     )
     command.args["snet_state"] = snet_state.to_dict()
@@ -148,6 +177,8 @@ def execute(payload: ExecuteRequest) -> Dict[str, Any]:
             internal_noise=payload.internal_noise,
             anomaly_score=payload.anomaly_score,
             intent_override=intent_override,
+            ren12_status=payload.ren12_status,
+            k12_status=payload.k12_status,
         )
     )
     result: Dict[str, Any] = {
