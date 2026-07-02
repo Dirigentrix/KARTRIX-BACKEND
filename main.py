@@ -1,5 +1,7 @@
+import os
 from typing import Any, Dict, Literal, Optional
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -53,6 +55,10 @@ class FeedbackRequest(SNetFeedback):
     pass
 
 
+class ChatRequest(BaseModel):
+    message: str
+
+
 @app.get("/")
 def root() -> Dict[str, str]:
     return {
@@ -65,6 +71,36 @@ def root() -> Dict[str, str]:
 @app.get("/state")
 def state() -> Dict[str, Any]:
     return snet_agent.snapshot()
+
+
+@app.post("/chat")
+async def chat(payload: ChatRequest):
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return {"reply": "Error: OPENAI_API_KEY not configured on backend."}
+        
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": "gpt-4",
+                    "messages": [
+                        {
+                            "role": "system", 
+                            "content": "You are SONIA, the guidance layer for the DARTRIX ecosystem. You are a calm, professional, and stable AI personality focused on regulation and orbital logic. Keep responses concise and focused on the DARTRIX/KARTRIX context."
+                        },
+                        {"role": "user", "content": payload.message}
+                    ]
+                },
+                timeout=30.0
+            )
+            response.raise_for_status()
+            result = response.json()
+            return {"reply": result["choices"][0]["message"]["content"]}
+        except Exception as e:
+            return {"reply": f"Error connecting to neural core: {str(e)}"}
 
 
 @app.post("/feedback")
